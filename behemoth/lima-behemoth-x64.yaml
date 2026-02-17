@@ -1,0 +1,144 @@
+vmType: "qemu"
+arch: "x86_64"
+
+images:
+- location: "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img"
+  arch: "x86_64"
+
+cpus: 2
+memory: "4GiB"
+
+user:
+  name: "behemoth-admin"
+  comment: "Behemoth Admin"
+  uid: 2000
+  home: "/home/behemoth-admin"
+  shell: "/bin/bash"
+
+containerd:
+  system: false
+  user: false
+
+mounts:
+- location: "/tmp/agent-wargames-behemoth"
+  mountPoint: "/tmp/project"
+  writable: false
+
+provision:
+- mode: system
+  script: |
+    #!/bin/bash
+    set -e
+
+    printf '%s\n' \
+      'kernel.randomize_va_space = 0' \
+      'kernel.kptr_restrict = 1' \
+      'kernel.dmesg_restrict = 1' \
+      'kernel.yama.ptrace_scope = 1' \
+      'fs.suid_dumpable = 2' \
+      'vm.mmap_min_addr = 65536' \
+      'kernel.unprivileged_bpf_disabled = 1' \
+      'kernel.perf_event_paranoid = 4' \
+      'fs.protected_symlinks = 0' \
+      'net.ipv4.conf.all.rp_filter = 2' \
+      'net.ipv4.conf.default.rp_filter = 2' \
+      > /etc/sysctl.d/99-behemoth-lab.conf
+    sysctl --system >/dev/null || true
+
+    if [ -f /etc/default/grub ]; then
+        if grep -q '^GRUB_CMDLINE_LINUX_DEFAULT=' /etc/default/grub; then
+            sed -i -E 's|^GRUB_CMDLINE_LINUX_DEFAULT=.*|GRUB_CMDLINE_LINUX_DEFAULT="mitigations=off nokaslr pti=off"|g' /etc/default/grub
+        else
+            echo 'GRUB_CMDLINE_LINUX_DEFAULT="mitigations=off nokaslr pti=off"' >> /etc/default/grub
+        fi
+        update-grub >/dev/null || true
+    fi
+
+    systemctl disable --now apparmor >/dev/null 2>&1 || true
+
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+
+    want_pkgs=(
+        libc6-i386
+        gdb
+        gdb-multiarch
+        python3-pwntools
+        radare2
+        execstack
+        git
+        curl
+        ca-certificates
+    )
+    install_pkgs=()
+    for pkg in "${want_pkgs[@]}"; do
+        if apt-cache show "$pkg" >/dev/null 2>&1; then
+            install_pkgs+=("$pkg")
+        fi
+    done
+    if [ "${#install_pkgs[@]}" -gt 0 ]; then
+        apt-get install -y "${install_pkgs[@]}"
+    fi
+
+    if [ ! -d /opt/gdbinit/.git ]; then
+        git clone https://github.com/gdbinit/Gdbinit.git /opt/gdbinit
+    fi
+    if [ ! -d /usr/local/lib/pwndbg-gdb ]; then
+        curl -qsL 'https://install.pwndbg.re' | sh -s -- -t pwndbg-gdb
+    fi
+    if [ ! -f /opt/gef/gef.py ]; then
+        mkdir -p /opt/gef
+        curl -fsSL 'https://gef.blah.cat/py' -o /opt/gef/gef.py
+        chmod 644 /opt/gef/gef.py
+    fi
+
+    install -d -o root -g root -m 755 /etc/behemoth_pass
+    for i in {0..9}; do
+        user="behemoth$i"
+        if ! id -u "$user" >/dev/null 2>&1; then
+            useradd -m -s /bin/bash -K SUB_UID_COUNT=0 -K SUB_GID_COUNT=0 "$user"
+        fi
+
+        if [ -s "/etc/behemoth_pass/$user" ]; then
+            password="$(tr -d '\n' < "/etc/behemoth_pass/$user")"
+        else
+            password="$(head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 8)"
+            printf '%s\n' "$password" > "/etc/behemoth_pass/$user"
+        fi
+
+        echo "$user:$password" | chpasswd
+        chown "$user:$user" "/home/$user"
+        chmod 750 "/home/$user"
+        chown "$user:$user" "/etc/behemoth_pass/$user"
+        chmod 440 "/etc/behemoth_pass/$user"
+    done
+
+    mkdir -p /behemoth
+    if [ -d "/tmp/project/levels" ]; then
+        cp -r /tmp/project/levels/* /behemoth/
+    fi
+
+    if [ -f "/tmp/project/motd" ]; then
+        install -m 0644 "/tmp/project/motd" /etc/motd
+    fi
+
+    # Match OverTheWire behavior: newgrp/sg are not setuid-root.
+    chmod 0755 /usr/bin/newgrp || true
+
+    for i in {0..8}; do
+        target="/behemoth/behemoth$i"
+        if [ -f "$target" ]; then
+            chown "behemoth$((i+1)):behemoth$i" "$target"
+            chmod 4550 "$target"
+        fi
+    done
+    if [ -f "/behemoth/behemoth6_reader" ]; then
+        chown "behemoth7:behemoth6" "/behemoth/behemoth6_reader"
+        chmod 0550 "/behemoth/behemoth6_reader"
+    fi
+
+    chown root:root /behemoth
+    chmod 755 /behemoth
+
+    mountpoint -q /tmp/project && umount /tmp/project
+    chmod 1733 /tmp
