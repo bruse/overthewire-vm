@@ -118,8 +118,8 @@ provision:
         cp -r /tmp/project/levels/* /behemoth/
     fi
 
-    if [ -f "/tmp/project/motd" ]; then
-        install -m 0644 "/tmp/project/motd" /etc/motd
+    if [ -f "/tmp/project/assets/motd" ]; then
+        install -m 0644 "/tmp/project/assets/motd" /etc/motd
     fi
 
     # Match OverTheWire behavior: newgrp/sg are not setuid-root.

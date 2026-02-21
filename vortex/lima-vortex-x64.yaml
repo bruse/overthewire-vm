@@ -1,0 +1,193 @@
+vmType: "qemu"
+arch: "x86_64"
+
+images:
+- location: "https://cloud-images.ubuntu.com/releases/focal/release-20220207/ubuntu-20.04-server-cloudimg-amd64.img"
+  arch: "x86_64"
+
+cpus: 2
+memory: "4GiB"
+
+user:
+  name: "vortex-admin"
+  comment: "Vortex Admin"
+  uid: 2000
+  home: "/home/vortex-admin"
+  shell: "/bin/bash"
+
+containerd:
+  system: false
+  user: false
+
+mounts:
+- location: "/tmp/agent-wargames-vortex"
+  mountPoint: "/tmp/project"
+  writable: false
+
+provision:
+- mode: system
+  script: |
+    #!/bin/bash
+    set -e
+
+    printf '%s\n' \
+      'kernel.randomize_va_space = 0' \
+      'kernel.kptr_restrict = 1' \
+      'kernel.dmesg_restrict = 1' \
+      'kernel.yama.ptrace_scope = 1' \
+      'fs.suid_dumpable = 2' \
+      'vm.mmap_min_addr = 65536' \
+      'kernel.unprivileged_bpf_disabled = 1' \
+      'kernel.perf_event_paranoid = 4' \
+      'fs.protected_symlinks = 0' \
+      'net.ipv4.conf.all.rp_filter = 2' \
+      'net.ipv4.conf.default.rp_filter = 2' \
+      > /etc/sysctl.d/99-vortex-lab.conf
+    sysctl --system >/dev/null || true
+
+    if [ -f /etc/default/grub ]; then
+        if grep -q '^GRUB_CMDLINE_LINUX_DEFAULT=' /etc/default/grub; then
+            sed -i -E 's|^GRUB_CMDLINE_LINUX_DEFAULT=.*|GRUB_CMDLINE_LINUX_DEFAULT="mitigations=off nokaslr pti=off"|g' /etc/default/grub
+        else
+            echo 'GRUB_CMDLINE_LINUX_DEFAULT="mitigations=off nokaslr pti=off"' >> /etc/default/grub
+        fi
+        update-grub >/dev/null || true
+    fi
+
+    systemctl disable --now apparmor >/dev/null 2>&1 || true
+
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+
+    want_pkgs=(
+        libc6-i386
+        gcc
+        gcc-multilib
+        gdb
+        gdb-multiarch
+        python3-pwntools
+        radare2
+        execstack
+        git
+        curl
+        ca-certificates
+    )
+    install_pkgs=()
+    for pkg in "${want_pkgs[@]}"; do
+        if apt-cache show "$pkg" >/dev/null 2>&1; then
+            install_pkgs+=("$pkg")
+        fi
+    done
+    if [ "${#install_pkgs[@]}" -gt 0 ]; then
+        apt-get install -y "${install_pkgs[@]}"
+    fi
+
+    if [ ! -d /opt/gdbinit/.git ]; then
+        git clone https://github.com/gdbinit/Gdbinit.git /opt/gdbinit
+    fi
+    if [ ! -d /usr/local/lib/pwndbg-gdb ]; then
+        curl -qsL 'https://install.pwndbg.re' | sh -s -- -t pwndbg-gdb
+    fi
+    if [ ! -f /opt/gef/gef.py ]; then
+        mkdir -p /opt/gef
+        curl -fsSL 'https://gef.blah.cat/py' -o /opt/gef/gef.py
+        chmod 644 /opt/gef/gef.py
+    fi
+
+    install -d -o root -g root -m 755 /etc/vortex_pass
+    for i in {0..27}; do
+        user="vortex$i"
+        if ! id -u "$user" >/dev/null 2>&1; then
+            useradd -m -s /bin/bash "$user"
+        fi
+
+        if [ -s "/etc/vortex_pass/$user" ]; then
+            password="$(tr -d '\n' < "/etc/vortex_pass/$user")"
+        else
+            password="$(head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 8)"
+            printf '%s\n' "$password" > "/etc/vortex_pass/$user"
+        fi
+
+        echo "$user:$password" | chpasswd
+        chown "$user:$user" "/home/$user"
+        chmod 750 "/home/$user"
+        chown "$user:$user" "/etc/vortex_pass/$user"
+        chmod 440 "/etc/vortex_pass/$user"
+    done
+
+    mkdir -p /vortex
+    levels_dir="/tmp/project/levels"
+    if [ -d "$levels_dir" ]; then
+        cp -r "$levels_dir"/. /vortex/
+    fi
+    rm -f /vortex/.empty
+
+    host_vortex20_dir="/tmp/project/host-files/home/vortex20"
+    if [ -d "/home/vortex20" ]; then
+        rm -f /home/vortex20/.empty
+        if [ -f "$host_vortex20_dir/vortex20.c" ]; then
+            install -o root -g vortex20 -m 0440 "$host_vortex20_dir/vortex20.c" "/home/vortex20/vortex20.c"
+        fi
+        if [ -f "$host_vortex20_dir/vortex20-readable-copy" ]; then
+            install -o root -g vortex20 -m 0550 "$host_vortex20_dir/vortex20-readable-copy" "/home/vortex20/vortex20-readable-copy"
+        fi
+    fi
+
+    if [ -f "/home/vortex20/vortex20.c" ]; then
+        gcc -m32 -fno-stack-protector -no-pie -Wl,-z,norelro -o /vortex/vortex20 /home/vortex20/vortex20.c
+        chown root:vortex21 /vortex/vortex20
+        chmod 0550 /vortex/vortex20
+    fi
+
+
+    for file in vortex22_factor.o vortex22_md5.h vortex22_md5.o; do
+        path="/vortex/$file"
+        if [ -f "$path" ]; then
+            chown vortex22:vortex22 "$path"
+            chmod 0400 "$path"
+        fi
+    done
+    if [ -f /vortex/vortex23.jpg ]; then
+        chown vortex23:vortex23 /vortex/vortex23.jpg
+        chmod 0640 /vortex/vortex23.jpg
+    fi
+
+    if [ -f "/tmp/project/assets/motd" ]; then
+        install -m 0644 "/tmp/project/assets/motd" /etc/motd
+    fi
+
+    # Match OverTheWire behavior: newgrp/sg are not setuid-root.
+    chmod 0755 /usr/bin/newgrp || true
+
+    for i in {0..26}; do
+        target="/vortex/vortex$i"
+        if [ -f "$target" ]; then
+            if [ "$i" -eq 20 ]; then
+                chown root:vortex21 "$target"
+                chmod 0550 "$target"
+            else
+                chown "vortex$((i+1)):vortex$i" "$target"
+                chmod 4550 "$target"
+            fi
+        fi
+    done
+
+    service_asset="/tmp/project/assets/vortex20.service"
+    if [ -f /vortex/vortex20 ] && [ -f "$service_asset" ]; then
+        install -o root -g root -m 0644 "$service_asset" /etc/systemd/system/vortex20.service
+        systemctl daemon-reload
+        systemctl enable --now vortex20.service
+    fi
+    if [ -f "$levels_dir/vortex14.txt" ]; then
+        install -o "vortex14" -g "vortex14" -m 0400 "$levels_dir/vortex14.txt" "/vortex/vortex14.txt"
+    fi
+
+    if [ -f "$levels_dir/vortex15.tar.Z.enc" ]; then
+        install -o "vortex15" -g "vortex15" -m 0400 "$levels_dir/vortex15.tar.Z.enc" "/vortex/vortex15.tar.Z.enc"
+    fi
+
+    chown root:root /vortex
+    chmod 755 /vortex
+
+    mountpoint -q /tmp/project && umount /tmp/project || true
+    chmod 1733 /tmp

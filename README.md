@@ -1,6 +1,6 @@
 # OverTheWire VM Lab
 
-This repo contains local VM setups that recreate OverTheWire wargame environments (starting with Behemoth). Each game lives in its own directory with its own template, launcher, levels, and MOTD.
+This repo contains local VM setups that recreate OverTheWire wargame environments (currently Behemoth and Vortex). Each game lives in its own directory with its own template, launcher, levels, and MOTD.
 
 See https://www.overthewire.org for the real environment.
 
@@ -10,6 +10,8 @@ We do our best to configure the VM similarly to the real wargame environment, bu
 
 Users homedirs are writable.
 
+For vortex we use an older ubuntu base image, due to a change in how the kernel deals with an empty argv, which otherwise breaks vortex13.
+
 ## Repository Structure
 
 - `<game>/lima-<game>-x64.yaml`
@@ -18,10 +20,13 @@ Users homedirs are writable.
   - Wrapper that injects the correct absolute host mount path at runtime.
 - `<game>/levels/`
   - Place game binaries here on the host; they are copied into the corresponding path in the VM during provisioning.
+- `<game>/assets/`
+  - Shared provisioning assets (for example MOTD text and systemd unit templates).
 
 Current game directory:
 
 - `behemoth/`
+- `vortex/`
 
 ## Where To Place Levels
 
@@ -34,11 +39,25 @@ For Behemoth specifically:
 
 On provisioning, files from `behemoth/levels/` are copied to `/behemoth` and ownership/modes are applied.
 
+For Vortex specifically:
+
+- expected names include `vortex0`, `vortex1`, ..., `vortex26`
+- Level 14, 15 and 23 have passwords hardcoded in their respective files, so the passwords the lima provisioning script sets are not accurate. You'll need to overwrite them manually if you want the actual user passwords to be correct.
+- Level 20 has important files in the homedirectory, copy those files to `vortex/host-files/home/vortex20 for the provisioning script to set them up correctly.
+
+On provisioning, files from `vortex/levels/` are copied to `/vortex` and ownership/modes are applied.
+
 ## Users And Passwords (Behemoth)
 
 - Users `behemoth0` through `behemoth9` are created.
 - Passwords are generated and stored in `/etc/behemoth_pass/behemothX`.
 - Each password file is readable only by that target user (`behemothX:behemothX`, `440`).
+
+## Users And Passwords (Vortex)
+
+- Users `vortex0` through `vortex27` are created.
+- Passwords are generated and stored in `/etc/vortex_pass/vortexX`.
+- Each password file is readable only by that target user (`vortexX:vortexX`, `440`).
 
 ## Start / Recreate (Behemoth)
 
@@ -48,12 +67,24 @@ From repo root:
 ./behemoth/start-lima-behemoth-x64.sh
 ```
 
+## Start / Recreate (Vortex)
+
+From repo root:
+
+```bash
+./vortex/start-lima-vortex-x64.sh
+```
+
 To start playing:
 
 ```bash
 limactl shell --workdir=/behemoth lima-behemoth-x64
 sudo su - behemoth0
 /behemoth/behemoth0
+
+limactl shell --workdir=/vortex lima-vortex-x64
+sudo su - vortex1
+/vortex/vortex1
 ```
 
 If you need a clean rebuild:

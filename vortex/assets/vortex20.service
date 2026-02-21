@@ -1,0 +1,12 @@
+[Unit]
+Description=Vortex level 20 listener
+After=network.target
+
+[Service]
+User=vortex21
+Group=vortex21
+ExecStart=/vortex/vortex20
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
