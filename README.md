@@ -59,7 +59,7 @@ On provisioning, files from `vortex/levels/` are copied to `/vortex` and ownersh
 - Passwords are generated and stored in `/etc/vortex_pass/vortexX`.
 - Each password file is readable only by that target user (`vortexX:vortexX`, `440`).
 
-## Start / Recreate (Behemoth)
+## Start Behemoth
 
 From repo root:
 
@@ -67,7 +67,23 @@ From repo root:
 ./behemoth/start-lima-behemoth-x64.sh
 ```
 
-## Start / Recreate (Vortex)
+To start playing:
+
+```bash
+limactl shell --workdir=/behemoth lima-behemoth-x64
+sudo su - behemoth0
+/behemoth/behemoth0
+```
+
+If you need a clean rebuild:
+
+```bash
+limactl stop lima-behemoth-x64
+limactl delete -f lima-behemoth-x64
+./behemoth/start-lima-behemoth-x64.sh
+```
+
+## Start Vortex
 
 From repo root:
 
@@ -78,10 +94,6 @@ From repo root:
 To start playing:
 
 ```bash
-limactl shell --workdir=/behemoth lima-behemoth-x64
-sudo su - behemoth0
-/behemoth/behemoth0
-
 limactl shell --workdir=/vortex lima-vortex-x64
 sudo su - vortex1
 /vortex/vortex1
@@ -90,9 +102,9 @@ sudo su - vortex1
 If you need a clean rebuild:
 
 ```bash
-limactl stop lima-behemoth-x64
-limactl delete -f lima-behemoth-x64
-./behemoth/start-lima-behemoth-x64.sh
+limactl stop lima-vortex-x64
+limactl delete -f lima-vortex-x64
+./vortex/start-lima-vortex-x64.sh
 ```
 
 ## AI agents setup
